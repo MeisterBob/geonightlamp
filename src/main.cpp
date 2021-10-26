@@ -30,15 +30,19 @@ typedef enum
     OFF,
     ON,
     CHARGE,
-    FULL
+    FULL,
+    UNKNOWN
 } states_t;
 states_t state     = OFF;
 states_t autostate = state;
 
+#define DELAY_COUNTER_MAX   10
+#define POWER_UPDATE_PERIOD 100
+unsigned long time_now = 0;
+
 /* function declarations */
 void     btn_handler();
 void     colorWipe(uint32_t c, uint8_t wait);
-void     pixel_show_and_powerupdate();
 void     rainbow(uint8_t wait);
 void     rainbowCycle(uint8_t wait);
 void     set_state(states_t s);
@@ -91,45 +95,44 @@ void loop() {
         for (size_t i = 0; i < pixels.numPixels(); i++) {
             pixels.setPixelColor(i, wheel((i + color) & 255));
         }
-        pixel_show_and_powerupdate();
+        pixels.show();
         delay(DELAY / 10);
         color++;
     }
-    pixel_show_and_powerupdate();
+    pixels.show();
+
+    if (millis() - time_now > POWER_UPDATE_PERIOD) {
+        time_now = millis();
+        update_power();
+    }
 }
 
 void set_state(states_t s) {
     state = s;
     Serial.print("setting state ");
-    Serial.println(s);
     switch (state) {
         case OFF:
+            Serial.println("OFF");
             pixels.setBrightness(0);
-            pixel_show_and_powerupdate();
+            pixels.show();
+            break;
+        case ON:
+            /* manual ON/OFF, will be handled in BTN handler */
+            Serial.println("ON");
+            pixels.setBrightness(FULL_BRIGHTNESS);
             break;
         case CHARGE:
             /* Blue */
+            Serial.println("CHARGE");
             pixels.setBrightness(FULL_BRIGHTNESS);
             colorWipe(pixels.Color(0, 0, 255), DELAY);
             break;
         case FULL:
             /* Green */
+            Serial.println("FULL");
             pixels.setBrightness(FULL_BRIGHTNESS);
             colorWipe(pixels.Color(0, 255, 0), DELAY);
             break;
-        case ON:
-            /* manual ON/OFF, will be handled in BTN handler */
-            pixels.setBrightness(FULL_BRIGHTNESS);
-            break;
-    }
-}
-
-/* update LEDs and measure current */
-void pixel_show_and_powerupdate() {
-    static uint8_t counter = 0;
-    pixels.show();
-    if (counter++ % (200 * pixels.numPixels()) == 0) {
-        update_power();
     }
 }
 
@@ -137,7 +140,7 @@ void pixel_show_and_powerupdate() {
 void colorWipe(uint32_t c, uint8_t wait) {
     for (uint16_t i = 0; i < pixels.numPixels(); i++) {
         pixels.setPixelColor(i, c);
-        pixel_show_and_powerupdate();
+        pixels.show();
         delay(wait);
     }
 }
@@ -150,7 +153,7 @@ void rainbowCycle(uint8_t wait) {
         for (i = 0; i < pixels.numPixels(); i++) {
             pixels.setPixelColor(i, wheel(((i * 256 / pixels.numPixels()) + j) & 255));
         }
-        pixel_show_and_powerupdate();
+        pixels.show();
         delay(wait);
     }
 }
@@ -162,7 +165,7 @@ void theaterChase(uint32_t c, uint8_t wait) {
             for (uint16_t i = 0; i < pixels.numPixels(); i = i + 3) {
                 pixels.setPixelColor(i + q, c);  // turn every third pixel on
             }
-            pixel_show_and_powerupdate();
+            pixels.show();
 
             delay(wait);
 
@@ -180,7 +183,7 @@ void theaterChaseRainbow(uint8_t wait) {
             for (uint16_t i = 0; i < pixels.numPixels(); i = i + 3) {
                 pixels.setPixelColor(i + q, wheel((i + j) % 255));  // turn every third pixel on
             }
-            pixel_show_and_powerupdate();
+            pixels.show();
 
             delay(wait);
 
@@ -207,6 +210,9 @@ uint32_t wheel(byte WheelPos) {
 }
 
 void update_power() {
+    static uint8_t delay_counter = 0;
+    states_t       next_state    = UNKNOWN;
+
     // digitalWrite(ONBOARD_LED, !digitalRead(ONBOARD_LED));
 
     /* Read voltage and current from INA219 */
@@ -220,17 +226,30 @@ void update_power() {
 
     states_t old_state = autostate;
     if (current_mA > 400) {
-        autostate = CHARGE;
+        next_state = CHARGE;
+        if (autostate == OFF) {
+            delay_counter = DELAY_COUNTER_MAX;
+        }
     } else if ((current_mA > 20) && current_mA < 300) {
-        autostate = FULL;
+        next_state = FULL;
     } else if (current_mA < 20) {
         autostate = OFF;
+    }
+
+    if ((next_state == CHARGE) || (next_state == FULL)) {
+        if ((next_state != autostate) && (delay_counter < DELAY_COUNTER_MAX)) {
+            delay_counter++;
+        } else {
+            autostate     = next_state;
+            delay_counter = 0;
+        }
     }
 
     if ((old_state != autostate) && ((old_state == state) || (autostate == OFF))) {
         /* state changed and in auto mode or Mobile disconnected (OFF) */
         set_state(autostate);
     }
+    // Serial.print(delay_counter);
     // Serial.print("shunt Voltage: ");
     // Serial.print(shuntvoltage);
     // Serial.println(" mV");
