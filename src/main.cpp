@@ -133,6 +133,9 @@ void set_state(states_t s) {
             pixels.setBrightness(FULL_BRIGHTNESS);
             colorWipe(pixels.Color(0, 255, 0), DELAY);
             break;
+        default:
+            /* we don't know the actual state */
+            break;
     }
 }
 
@@ -225,14 +228,14 @@ void update_power() {
     power_mW    = loadvoltage * current_mA;
 
     states_t old_state = autostate;
-    if (current_mA > 400) {
+    if (current_mA > 300) {
         next_state = CHARGE;
         if (autostate == OFF) {
             delay_counter = DELAY_COUNTER_MAX;
         }
-    } else if ((current_mA > 20) && current_mA < 300) {
+    } else if ((current_mA > 20) && current_mA < 200) {
         next_state = FULL;
-    } else if (current_mA < 20) {
+    } else if (current_mA < 10) {
         autostate = OFF;
     }
 
